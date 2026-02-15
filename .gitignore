@@ -1,0 +1,14 @@
+# --- DATASET GIGANTI ---
+*.json
+data/
+vast-challenge-project/public/*.json
+
+# --- DIPENDENZE NODE (IL COLPEVOLE DEL BLOCCO) ---
+node_modules/
+vast-challenge-project/node_modules/
+
+# --- FILE DI SISTEMA E BUILD ---
+.DS_Store
+dist/
+__pycache__/
+.ipynb_checkpoints/
