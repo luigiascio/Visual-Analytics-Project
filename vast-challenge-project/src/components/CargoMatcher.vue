@@ -7,8 +7,7 @@
         <div class="header-left">
           <h3>Cargo Traffic Monitor</h3>
           <span class="stat-badge">
-            <strong>{{ filteredData.length }}</strong> Records
-          </span>
+            <strong>{{ filteredData.length }}</strong> Records </span>
         </div>
 
         <div class="header-controls">
@@ -113,28 +112,29 @@
 import { ref, onMounted, computed, watch, nextTick } from 'vue';
 import * as d3 from 'd3';
 
-const props = defineProps(['data']);
+const props = defineProps(['data']); // Input dati grezzi
 
-// --- STATE ---
-const chartRef = ref(null);
-const tooltipRef = ref(null);
-const selectedCommodity = ref('ALL_SUSPECT');
-const startDate = ref('');
-const endDate = ref('');
-const selectedReport = ref(null);
-const loading = ref(false);
+// --- STATO REATTIVO ---
+const chartRef = ref(null);         // Riferimento al div del grafico
+const tooltipRef = ref(null);       // Riferimento al tooltip
+const selectedCommodity = ref('ALL_SUSPECT'); // Filtro categoria attivo
+const startDate = ref('');          // Data inizio filtro
+const endDate = ref('');            // Data fine filtro
+const selectedReport = ref(null);   // Report selezionato (click sul grafico)
+const loading = ref(false);         // Stato caricamento
 
-// --- UTILS (COLORI) ---
+// --- UTILS ---
+// Assegna colori in base al tipo di merce (Logica di business)
 const getColor = (commodity) => {
   const c = (commodity || "").toLowerCase();
   if (c.includes('suspect')) {
-    if (c.includes('tuna') || c.includes('mixed')) return '#6366f1'; // Indaco
-    return '#8b5cf6'; // Viola chiaro
+    if (c.includes('tuna') || c.includes('mixed')) return '#6366f1'; 
+    return '#8b5cf6'; 
   }
-  if (c.includes('cod')) return '#0ea5e9'; // Azzurro cielo
-  if (c.includes('tuna')) return '#10b981'; // Verde acqua
-  if (c.includes('wrasse') || c.includes('salmon')) return '#06b6d4'; // Ciano
-  return '#94a3b8'; // Grigio
+  if (c.includes('cod')) return '#0ea5e9'; 
+  if (c.includes('tuna')) return '#10b981'; 
+  if (c.includes('wrasse') || c.includes('salmon')) return '#06b6d4'; 
+  return '#94a3b8'; 
 };
 
 const formatQty = (val) => {
@@ -142,7 +142,8 @@ const formatQty = (val) => {
     return Number(val).toFixed(2);
 };
 
-// --- DATA PARSING ---
+// --- PARSING E FILTRAGGIO DATI ---
+// Trasforma i dati grezzi in oggetti utilizzabili (Date object, numeri)
 const parsedData = computed(() => {
   if (!props.data || !Array.isArray(props.data)) return [];
   const parser = d3.timeParse("%Y-%m-%d %H:%M:%S");
@@ -150,26 +151,31 @@ const parsedData = computed(() => {
   return props.data.map(d => {
     let comm = d.commodity;
     if (!comm || comm === 'nan' || comm === 'null') comm = 'Unknown';
+    
+    // Parsing data robusto
     let finalDate = d.dateObj;
     if (!finalDate || !(finalDate instanceof Date) || isNaN(finalDate)) {
         finalDate = parser(d.date) || new Date(d.date);
     }
-    let qty = +d.qty_tons;
+    
+    let qty = +d.qty_tons; // Converte stringa in numero
     if (isNaN(qty)) qty = 0;
 
     return { ...d, commodity: comm, dateObj: finalDate, qty_tons: qty };
   }).filter(d => d.dateObj instanceof Date && !isNaN(d.dateObj));
 });
 
+// Estrae lista unica delle merci per il menu a tendina
 const distinctCommodities = computed(() => 
   [...new Set(parsedData.value.map(d => d.commodity))].sort()
 );
 
+// Applica i filtri (Data e Merce) ai dati parsati
 const filteredData = computed(() => {
   if (!startDate.value || !endDate.value) return [];
   const start = new Date(startDate.value);
   const end = new Date(endDate.value);
-  end.setHours(23, 59, 59);
+  end.setHours(23, 59, 59); // Include tutta la giornata finale
 
   return parsedData.value.filter(d => {
     let validComm = true;
@@ -183,6 +189,8 @@ const filteredData = computed(() => {
   });
 });
 
+// --- WATCHERS ---
+// Inizializza date min/max quando arrivano nuovi dati
 watch(() => props.data, async (newData) => {
   if (newData && newData.length > 0) {
     loading.value = true;
@@ -195,77 +203,92 @@ watch(() => props.data, async (newData) => {
             endDate.value = maxD.toISOString().split('T')[0];
         }
     }
-    await nextTick();
+    await nextTick(); // Aspetta render DOM
     drawChart();
     loading.value = false;
   }
 }, { immediate: true, deep: true });
 
+// Ridisegna grafico se cambiano i filtri
 watch([selectedCommodity, startDate, endDate], () => {
-  selectedReport.value = null; 
+  selectedReport.value = null; // Resetta dettaglio aperto
   drawChart();
 });
 
 const formatDate = d3.timeFormat("%d %b %Y");
 
-// --- D3 CHART ---
+// --- LOGICA D3.JS ---
 const drawChart = () => {
   const container = chartRef.value;
   if (!container) return;
-  d3.select(container).selectAll("*").remove();
+  d3.select(container).selectAll("*").remove(); // Pulisce SVG
 
   const data = filteredData.value;
   if (!data.length) return;
 
+  // Configurazione dimensioni e margini
   const margin = { top: 20, right: 30, bottom: 40, left: 60 };
   const width = container.clientWidth - margin.left - margin.right;
   const height = 400 - margin.top - margin.bottom;
 
   if (width <= 0) return;
 
+  // Setup SVG principale
   const svg = d3.select(container).append("svg")
     .attr("width", width + margin.left + margin.right)
     .attr("height", height + margin.top + margin.bottom)
     .append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
+  // Scala X (Tempo)
   const x = d3.scaleTime().domain(d3.extent(data, d => d.dateObj)).range([0, width]);
+  
+  // Scala Y (Quantità) - Adatta dominio per includere negativi
   const yExtent = d3.extent(data, d => d.qty_tons);
   const yMin = Math.min(0, (yExtent[0] || 0) * 1.1);
   const yMax = Math.max(0, (yExtent[1] || 100) * 1.1);
   const y = d3.scaleLinear().domain([yMin, yMax]).range([height, 0]);
 
+  // Griglia X leggera
   const xGrid = d3.axisBottom(x).ticks(10).tickSize(-height).tickFormat("");
   svg.append("g").attr("class", "grid").attr("transform", `translate(0,${height})`)
       .style("opacity", 0.05).call(xGrid);
 
+  // Assi X e Y
   const xAxis = d3.axisBottom(x).ticks(Math.max(5, Math.floor(width/80))).tickFormat(d3.timeFormat("%d %b"));
   svg.append("g").attr("transform", `translate(0,${height})`).call(xAxis).style("color", "#64748b");
   svg.append("g").call(d3.axisLeft(y)).style("color", "#64748b");
 
+  // Linea dello zero (per separare pos/neg)
   svg.append("line").attr("x1",0).attr("x2",width).attr("y1",y(0)).attr("y2",y(0))
       .attr("stroke","#cbd5e1").attr("stroke-dasharray","4");
 
+  // Etichetta asse Y
   svg.append("text").attr("transform", "rotate(-90)").attr("y", -45).attr("x", -height/2)
       .attr("text-anchor", "middle").style("fill", "#64748b").style("font-size", "12px").text("Quantity (Tons)");
 
   const tooltip = d3.select(tooltipRef.value);
 
+  // Definizione simboli (Triangolo per negativi, Cerchio per positivi)
   const triangle = d3.symbol().type(d3.symbolTriangle).size(60);
   const circle = d3.symbol().type(d3.symbolCircle).size(60);
 
+  // Disegno punti (Scatterplot)
   svg.selectAll(".point")
     .data(data)
     .enter().append("path")
     .attr("class", "point")
+    // Sceglie forma in base al segno della quantità
     .attr("d", d => d.qty_tons < 0 ? triangle() : circle())
+    // Posiziona punto (ruota triangolo se negativo)
     .attr("transform", d => `translate(${x(d.dateObj)}, ${y(d.qty_tons)}) ${d.qty_tons < 0 ? 'rotate(180)' : ''}`) 
-    // MODIFICA QUI: Uso sempre il colore della commodity
     .attr("fill", d => getColor(d.commodity)) 
     .attr("stroke", "white")
     .attr("stroke-width", 1)
     .style("cursor", "pointer")
     .style("opacity", 0.8)
+    
+    // Interazione Mouseover (Ingrandisce + Tooltip)
     .on("mouseover", function(event, d) {
        d3.select(this)
          .transition().duration(100)
@@ -277,11 +300,14 @@ const drawChart = () => {
             <strong>${d.report_id}</strong><br>
             ${d.commodity}<br>
             <span>${formatQty(d.qty_tons)} tons</span>
-         `)
+          `)
          .style("left", (event.pageX + 10) + "px")
          .style("top", (event.pageY - 30) + "px");
     })
+    
+    // Interazione Mouseout (Ripristina dimensione)
     .on("mouseout", function(event) {
+       // Non rimpicciolisce se è il punto selezionato
        const isSelected = selectedReport.value && selectedReport.value.report_id === d3.select(this).datum().report_id;
        if (!isSelected) {
          d3.select(this)
@@ -291,13 +317,17 @@ const drawChart = () => {
        }
        tooltip.style("opacity", 0);
     })
+    
+    // Interazione Click (Seleziona report e apre pannello)
     .on("click", function(event, d) {
        selectedReport.value = d;
+       // Resetta stile altri punti
        svg.selectAll(".point")
           .attr("d", p => d3.symbol().type(p.qty_tons < 0 ? d3.symbolTriangle : d3.symbolCircle).size(60)())
           .style("opacity", 0.8)
           .attr("stroke", "white").attr("stroke-width", 1);
        
+       // Evidenzia punto cliccato (Bordo scuro + Grande)
        d3.select(this)
           .attr("d", d3.symbol().type(d.qty_tons < 0 ? d3.symbolTriangle : d3.symbolCircle).size(200)())
           .style("opacity", 1)
@@ -305,10 +335,12 @@ const drawChart = () => {
     });
 };
 
+// Ridisegna al resize finestra
 onMounted(() => window.addEventListener('resize', drawChart));
 </script>
 
 <style scoped>
+/* CSS per layout card e pannelli */
 .matcher-wrapper { width: 100%; }
 
 .analytics-card {
@@ -320,6 +352,7 @@ onMounted(() => window.addEventListener('resize', drawChart));
   margin-bottom: 20px;
 }
 
+/* Stili Header e Controlli */
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -328,7 +361,6 @@ onMounted(() => window.addEventListener('resize', drawChart));
   border-bottom: 1px solid #e2e8f0;
   background-color: #fff;
 }
-
 .header-left h3 { margin: 0; color: #2c3e50; font-size: 1.2rem; font-weight: 700; }
 .stat-badge { background: #f1f5f9; color: #64748b; font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; margin-top: 4px; display: inline-block; }
 
@@ -339,27 +371,28 @@ onMounted(() => window.addEventListener('resize', drawChart));
 .date-wrapper input { border: none; font-family: inherit; color: #334155; outline: none; font-size: 0.9rem; }
 .arrow { color: #94a3b8; font-size: 0.8rem; }
 
+/* Stili Grafico */
 .chart-section { position: relative; background: #fdfdfd; padding: 20px; min-height: 400px; }
 .d3-container { width: 100%; height: 400px; }
 .overlay-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #94a3b8; }
 .custom-tooltip { position: absolute; background: rgba(44, 62, 80, 0.95); color: white; padding: 8px 12px; border-radius: 6px; pointer-events: none; font-size: 0.8rem; opacity: 0; transition: opacity 0.2s; z-index: 50; }
 
+/* Stili Legenda */
 .custom-legend { display: flex; gap: 30px; margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0; font-size: 0.8rem; justify-content: center; }
 .legend-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .legend-title { font-weight: bold; margin-right: 5px; color: #475569; }
 .legend-item { display: flex; align-items: center; color: #64748b; }
 .dot { width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
-
-/* LEGENDA TRIANGOLO NEUTRA (GRIGIO SCURO) */
 .triangle-icon {
   width: 0; 
   height: 0; 
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 8px solid #475569; /* Triangolo Grigio Scuro */
+  border-top: 8px solid #475569; 
   margin-right: 5px;
 }
 
+/* Stili Pannello Dettagli */
 .details-panel {
   background: white;
   padding: 20px;
@@ -368,7 +401,6 @@ onMounted(() => window.addEventListener('resize', drawChart));
   border: 1px solid #e2e8f0;
   margin-top: 20px;
 }
-
 .slide-up-enter-active, .slide-up-leave-active { transition: all 0.3s ease; }
 .slide-up-enter-from, .slide-up-leave-to { opacity: 0; transform: translateY(20px); }
 
@@ -379,27 +411,14 @@ onMounted(() => window.addEventListener('resize', drawChart));
 
 .report-info { display: flex; gap: 10px; margin-bottom: 20px; }
 .info-pill { padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 0.85rem; }
-.negative-pill { background-color: #f8fafc; color: #475569; border: 1px solid #94a3b8; } /* Pill neutra per negativo */
+.negative-pill { background-color: #f8fafc; color: #475569; border: 1px solid #94a3b8; }
 .date-pill { background-color: #f1f5f9; color: #475569; }
 
-.candidates-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 15px;
-}
-
-.vessel-card {
-  border: 1px solid #e2e8f0;
-  padding: 12px;
-  border-radius: 6px;
-  background: #f8fafc;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-}
-
+.candidates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
+.vessel-card { border: 1px solid #e2e8f0; padding: 12px; border-radius: 6px; background: #f8fafc; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
 .v-head { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.95rem; }
 .v-flag { background: #e2e8f0; padding: 1px 6px; border-radius: 4px; font-size: 0.75rem; color: #64748b; }
 .v-body { font-size: 0.85rem; color: #64748b; }
-
 .provenance { margin-top: 8px; padding: 6px; background: #fff; border-left: 3px solid #cbd5e1; border-radius: 2px; font-size: 0.85rem; }
 .provenance.alert-purple { border-left-color: #8b5cf6; color: #5b21b6; background: #f5f3ff; }
 .icon { margin-right: 4px; }
